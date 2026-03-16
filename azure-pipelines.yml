@@ -1,7 +1,7 @@
 trigger: none
 
 pool:
-  name: Default
+  name: Vmss
 
 variables:
   subscriptionId: '21167026-2b17-4ffa-b927-d6efdbb87d70'
