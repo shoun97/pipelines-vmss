@@ -1,18 +1,18 @@
 trigger: none
 
 pool:
-  vmImage: 'ubuntu-latest'
+  name: Default
 
 variables:
-  subscriptionId: 'ddd4d806-c352-4f1d-ab0a-b1c3fa05e4f0'
+  subscriptionId: '21167026-2b17-4ffa-b927-d6efdbb87d70'
   resourceGroup: 'myVMSSResourceGroup'
   location: 'eastus2'
   identityName: 'myVMSSIdentity'
-  storageAccountName: 'vmssstorageaccount'
+  storageAccountName: 'vmssstorageaccountnxtara'
   galleryName: 'myVMSSGallery'
   imageDefinitionName: 'MyImage'
   vmssName: 'vmssScaleSet'
-  azureServiceConnection: 'NOMBRE-DE-TU-SERVICE-CONNECTION'
+  azureServiceConnection: 'svc-azure-oidc-lol'
 
 steps:
   - task: Maven@4
