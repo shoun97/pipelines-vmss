@@ -1,27 +1,110 @@
 trigger: none
 
-  pool:
-    vmImage: 'ubuntu-latest'
+pool:
+  vmImage: 'ubuntu-latest'
 
-  steps:
-- task: Maven@4
-  inputs:
-    mavenPomFile: 'pom.xml'
-    mavenOptions: '-Xmx3072m'
-    javaHomeOption: 'JDKVersion'
-    jdkVersionOption: '1.8'
-    jdkArchitectureOption: 'x64'
-    publishJUnitResults: true
-    testResultsFiles: '**/surefire-reports/TEST-*.xml'
-    goals: 'package'
+variables:
+  subscriptionId: 'ddd4d806-c352-4f1d-ab0a-b1c3fa05e4f0'
+  resourceGroup: 'myVMSSResourceGroup'
+  location: 'eastus2'
+  identityName: 'myVMSSIdentity'
+  storageAccountName: 'vmssstorageaccount'
+  galleryName: 'myVMSSGallery'
+  imageDefinitionName: 'MyImage'
+  vmssName: 'vmssScaleSet'
+  azureServiceConnection: 'NOMBRE-DE-TU-SERVICE-CONNECTION'
 
-- task: CopyFiles@2
-  displayName: 'Copy File to: $(TargetFolder)'
-  inputs:
-    SourceFolder: '$(Build.SourcesDirectory)'
-    Contents: |
-      **/*.sh 
-      **/*.war
-      **/*jar-with-dependencies.jar
-    TargetFolder: '$(System.DefaultWorkingDirectory)/pipeline-artifacts/'
-    flattenFolders: true
+steps:
+  - task: Maven@4
+    displayName: 'Build Java package'
+    inputs:
+      mavenPomFile: 'pom.xml'
+      mavenOptions: '-Xmx3072m'
+      javaHomeOption: 'JDKVersion'
+      jdkVersionOption: '1.8'
+      jdkArchitectureOption: 'x64'
+      publishJUnitResults: true
+      testResultsFiles: '**/surefire-reports/TEST-*.xml'
+      goals: 'package'
+
+  - script: |
+      set -euo pipefail
+      chmod +x install.sh
+      sha256sum install.sh > install.sh.sha256
+    displayName: 'Generate checksum for install.sh'
+
+  - task: CopyFiles@2
+    displayName: 'Prepare pipeline artifacts folder'
+    inputs:
+      SourceFolder: '$(Build.SourcesDirectory)'
+      Contents: |
+        install.sh
+        install.sh.sha256
+        **/*.war
+        **/*jar-with-dependencies.jar
+      TargetFolder: '$(System.DefaultWorkingDirectory)/pipeline-artifacts'
+      flattenFolders: true
+
+  - task: AzureImageBuilderTask@1
+    displayName: 'Azure VM Image Builder Task'
+    inputs:
+      managedIdentity: '/subscriptions/$(subscriptionId)/resourceGroups/$(resourceGroup)/providers/Microsoft.ManagedIdentity/userAssignedIdentities/$(identityName)'
+      imageSource: 'marketplace'
+      packagePath: '$(System.DefaultWorkingDirectory)/pipeline-artifacts'
+      inlineScript: |
+        set -euo pipefail
+
+        echo "Listing injected artifacts..."
+        ls -la /tmp || true
+        find /tmp -maxdepth 3 -type f | sort || true
+
+        TARGET_DIR="/lib/buildArtifacts"
+        sudo mkdir -p "$TARGET_DIR"
+
+        INSTALL_PATH=$(find /tmp -type f -name install.sh | head -n 1)
+        CHECKSUM_PATH=$(find /tmp -type f -name install.sh.sha256 | head -n 1)
+
+        if [ -z "${INSTALL_PATH:-}" ]; then
+          echo "ERROR: install.sh not found in injected artifacts."
+          exit 1
+        fi
+
+        cp "$INSTALL_PATH" ./install.sh
+
+        if [ -z "${CHECKSUM_PATH:-}" ]; then
+          echo "ERROR: install.sh.sha256 not found."
+          exit 1
+        fi
+
+        cp "$CHECKSUM_PATH" ./install.sh.sha256
+        sha256sum -c install.sh.sha256
+
+        chmod +x install.sh
+        sudo cp install.sh "$TARGET_DIR/install.sh"
+        sudo "$TARGET_DIR/install.sh"
+      storageAccountName: '$(storageAccountName)'
+      distributeType: 'sig'
+      galleryImageId: '/subscriptions/$(subscriptionId)/resourceGroups/$(resourceGroup)/providers/Microsoft.Compute/galleries/$(galleryName)/images/$(imageDefinitionName)'
+      replicationRegions: 'eastus2'
+      ibSubscription: '$(subscriptionId)'
+      ibAzureResourceGroup: '$(resourceGroup)'
+      ibLocation: '$(location)'
+
+  - task: AzureCLI@2
+    displayName: 'Update VMSS to new image version'
+    inputs:
+      azureSubscription: '$(azureServiceConnection)'
+      scriptType: 'bash'
+      scriptLocation: 'inlineScript'
+      inlineScript: |
+        set -euo pipefail
+
+        IMAGE_VERSION_ID="/subscriptions/$(subscriptionId)/resourceGroups/$(resourceGroup)/providers/Microsoft.Compute/galleries/$(galleryName)/images/$(imageDefinitionName)/versions/0.0.$(Build.BuildId)"
+
+        echo "Updating VMSS image reference to:"
+        echo "$IMAGE_VERSION_ID"
+
+        az vmss update \
+          --resource-group "$(resourceGroup)" \
+          --name "$(vmssName)" \
+          --set virtualMachineProfile.storageProfile.imageReference.id="$IMAGE_VERSION_ID"
