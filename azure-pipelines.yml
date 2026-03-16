@@ -15,14 +15,29 @@ variables:
   azureServiceConnection: 'svc-azure-oidc-lol'
 
 steps:
+  - script: |
+      set -euo pipefail
+
+      echo "Updating package index..."
+      sudo apt-get update
+
+      echo "Installing Java and Maven..."
+      sudo apt-get install -y openjdk-17-jdk maven
+
+      echo "Java version:"
+      java -version
+
+      echo "Maven version:"
+      mvn -version
+    displayName: 'Install Java and Maven on VMSS agent'
+
   - task: Maven@4
     displayName: 'Build Java package'
     inputs:
       mavenPomFile: 'pom.xml'
       mavenOptions: '-Xmx3072m'
-      javaHomeOption: 'JDKVersion'
-      jdkVersionOption: '1.8'
-      jdkArchitectureOption: 'x64'
+      javaHomeOption: 'Path'
+      jdkDirectory: '/usr/lib/jvm/java-17-openjdk-amd64'
       publishJUnitResults: true
       testResultsFiles: '**/surefire-reports/TEST-*.xml'
       goals: 'package'
